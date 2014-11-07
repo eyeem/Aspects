@@ -317,21 +317,23 @@ static void aspect_cleanupHookedClassAndSelector(NSObject *self, SEL selector) {
         // Destroy the container
         aspect_destroyContainerForObject(self, selector);
 
-        // Figure out how the class was modified to undo the changes.
-        NSString *className = NSStringFromClass(klass);
-        if ([className hasSuffix:AspectsSubclassSuffix]) {
-            Class originalClass = NSClassFromString([className stringByReplacingOccurrencesOfString:AspectsSubclassSuffix withString:@""]);
-            NSCAssert(originalClass != nil, @"Original class must exist");
-            object_setClass(self, originalClass);
-            AspectLog(@"Aspects: %@ has been restored.", NSStringFromClass(originalClass));
-
-            // We can only dispose the class pair if we can ensure that no instances exist using our subclass.
-            // Since we don't globally track this, we can't ensure this - but there's also not much overhead in keeping it around.
-            //objc_disposeClassPair(object.class);
-        }else {
-            // Class is most likely swizzled in place. Undo that.
-            if (isMetaClass) {
-                aspect_undoSwizzleClassInPlace((Class)self);
+        if (!aspect_isClassSwizzled(self)) {
+            // Figure out how the class was modified to undo the changes.
+            NSString *className = NSStringFromClass(klass);
+            if ([className hasSuffix:AspectsSubclassSuffix]) {
+                Class originalClass = NSClassFromString([className stringByReplacingOccurrencesOfString:AspectsSubclassSuffix withString:@""]);
+                NSCAssert(originalClass != nil, @"Original class must exist");
+                object_setClass(self, originalClass);
+                AspectLog(@"Aspects: %@ has been restored.", NSStringFromClass(originalClass));
+                
+                // We can only dispose the class pair if we can ensure that no instances exist using our subclass.
+                // Since we don't globally track this, we can't ensure this - but there's also not much overhead in keeping it around.
+                //objc_disposeClassPair(object.class);
+            }else {
+                // Class is most likely swizzled in place. Undo that.
+                if (isMetaClass) {
+                    aspect_undoSwizzleClassInPlace((Class)self);
+                }
             }
         }
     }
@@ -641,10 +643,24 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
         if (tracker) {
             [tracker.selectorNames removeObject:selectorName];
             if (tracker.selectorNames.count == 0) {
-                [swizzledClassesDict removeObjectForKey:tracker];
+                [swizzledClassesDict removeObjectForKey:currentClass];
             }
         }
     }while ((currentClass = class_getSuperclass(currentClass)));
+}
+
+static BOOL aspect_isClassSwizzled(NSObject *self)
+{
+    if (class_isMetaClass(object_getClass(self)))
+    {
+        Class klass = [self class];
+        NSMutableDictionary *swizzledClassesDict = aspect_getSwizzledClassesDict();
+        AspectTracker *tracker = swizzledClassesDict[klass];
+        if (!tracker) {
+            return NO;
+        }
+    }
+    return YES;
 }
 
 @end
